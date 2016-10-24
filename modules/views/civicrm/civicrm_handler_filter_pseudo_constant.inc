@@ -33,6 +33,38 @@
  *
  */
 class civicrm_handler_filter_pseudo_constant extends views_handler_filter_in_operator {
+
+
+/**
+   * @var views_many_to_one_helper
+   *
+   * Stores the Helper object which handles the many_to_one complexity.
+   */
+  var $helper = NULL;
+
+  function init(&$view, &$options) {
+    parent::init($view, $options);
+    $this->helper = new views_many_to_one_helper($this);
+  }
+
+  function option_definition() {
+    $options = parent::option_definition();
+
+    $options['operator']['default'] = 'or';
+    $options['value']['default'] = array();
+
+    if (isset($this->helper)) {
+      $this->helper->option_definition($options);
+    }
+    else {
+      $helper = new views_many_to_one_helper($this);
+      $helper->option_definition($options);
+    }
+
+    return $options;
+  }
+
+
   public $_pseudo_constant; function construct() {
     parent::construct();
     if (!civicrm_initialize() ||
@@ -41,6 +73,8 @@ class civicrm_handler_filter_pseudo_constant extends views_handler_filter_in_ope
     ) {
       return;
     }
+
+
 
     // Load pseudo arguments if passed as array from hook_views_data
     if (isset($this->definition['pseudo args']) && is_array($this->definition['pseudo args'])) {
@@ -58,6 +92,54 @@ class civicrm_handler_filter_pseudo_constant extends views_handler_filter_in_ope
     $this->_pseudo_constant = call_user_func_array($this->definition['pseudo class'] . "::" . $this->definition['pseudo method'], $pseudo_args);
   }
 
+
+ function operators() {
+    $operators = array(
+      'in' => array(
+        'title' => t('Is one of'),
+        'short' => t('in'),
+        'short_single' => t('='),
+        'method' => 'op_simple',
+        'values' => 1,
+      ),
+      'not in' => array(
+        'title' => t('Is not one of'),
+        'short' => t('not in'),
+        'short_single' => t('<>'),
+        'method' => 'op_simple',
+        'values' => 1,
+      ),
+      'and' => array(
+        'title' => t('Is all of'),
+        'short' => t('and'),
+        'short_single' => t('='),
+        'method' => 'op_helper',
+        'values' => 1,
+        'ensure_my_table' => 'helper',
+      ),
+    );
+
+    // if the definition allows for the empty operator, add it.
+    if (!empty($this->definition['allow empty'])) {
+      $operators += array(
+        'empty' => array(
+          'title' => t('Is empty (NULL)'),
+          'method' => 'op_empty',
+          'short' => t('empty'),
+          'values' => 0,
+        ),
+        'not empty' => array(
+          'title' => t('Is not empty (NOT NULL)'),
+          'method' => 'op_empty',
+          'short' => t('not empty'),
+          'values' => 0,
+        ),
+      );
+    }
+
+    return $operators;
+  }
+
   function get_value_options() {
     if (!isset($this->value_options)) {
       $this->value_title = $this->definition['title'];
@@ -67,6 +149,28 @@ class civicrm_handler_filter_pseudo_constant extends views_handler_filter_in_ope
       }
       $this->value_options = $options;
     }
+  }
+
+
+ /**
+   * Override ensure_my_table so we can control how this joins in.
+   * The operator actually has influence over joining.
+   */
+  function ensure_my_table() {
+    // Defer to helper if the operator specifies it.
+    $info = $this->operators();
+    if (isset($info[$this->operator]['ensure_my_table']) && $info[$this->operator]['ensure_my_table'] == 'helper') {
+      return $this->helper->ensure_my_table();
+    }
+
+    return parent::ensure_my_table();
+  }
+
+  function op_helper() {
+    if (empty($this->value)) {
+      return;
+    }
+    $this->helper->add_filter();
   }
 }
 
